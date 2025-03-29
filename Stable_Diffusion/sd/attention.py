@@ -5,6 +5,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import math
 
 # self attention block
 class selfAttention(nn.Module):
@@ -69,6 +70,56 @@ class selfAttention(nn.Module):
 
         return output
 
+class crossAttention(nn.Module):
+    def __init__(self,embed_dim : int, num_heads : int, d_cross : int, 
+                 in_proj_bias : bool = True, out_proj_bias : bool = True):
+        super().__init__()
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=in_proj_bias)
+        self.k_proj = nn.Linear(d_cross, embed_dim, bias = in_proj_bias)
+        self.v_proj = nn.Linear(d_cross, embed_dim, bias=in_proj_bias)
+
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=out_proj_bias)
+        self.n_heads = num_heads
+        self.d_head = embed_dim // num_heads
+
+
+    def forward(self,x, y):
+        # x : batch_size, height*width, embed_dim
+        # y : batch_size, seq_len, d_cross
+        # x.shape -> x.shape
+        # query vector from x and key, value from y
+        q = self.q_proj(x)
+        # y.shape -> x.shape
+        k = self.k_proj(y)
+        # y.shape -> x.shape
+        v = self.v_proj(y)
+
+        b, seq_len, embed_dim = x.shape
+
+        # b, seq_len, embed_dim -> b, seq_len, n_heads, d_head -> b, n_heads, seq_len, d_head
+        q = q.view((b, seq_len, self.n_heads, self.d_head)).transpose(1,2)
+        k = k.view((b, seq_len, self.n_heads, self.d_head)).transpose(1,2)
+        v = v.view((b, seq_len, self.n_heads, self.d_head)).transpose(1,2)
+
+        # b, n_heads, seq_len, d_head @ b, n_heads, d_head, seq_len -> b, n_heads, seq_len, seq_len
+        attention_scores = q @ k.transpose(-1,-2)
+
+        attention_scores = attention_scores / math.sqrt(self.d_head)
+
+        attention_scores = F.softmax(attention_scores, dim=-1)
+        # b, n_heads, seq_len, d_head
+        output = attention_scores @ v
+        # b, seq_len, n_heads, d_head
+        output = output.transpose(1,2).contiguous()
+        # b, seq_len, embed_dim
+        output = output.view((b, seq_len, embed_dim))
+        # b, seq_len, embed_dim
+        output = self.out_proj(output)
+
+        return output
+
+
+        
 
 
 
