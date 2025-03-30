@@ -95,7 +95,7 @@ def generate(prompt : str, uncond_prompt : str, input_image : None,
             # image height, image width, channels
             input_image_tensor = torch.tensor(input_image, dtype=torch.float32, device=device)
             # rescale the input image to the range [-1, 1] suitable for encoder
-            input_image_tensor = scale(input_image_tensor, (0,255),(-1,1))
+            input_image_tensor = rescale(input_image_tensor, (0,255),(-1,1))
             # height, width, channels -> batch_size, height, width
             input_image_tensor = input_image_tensor.unsqueeze(0)
             # batch_size, height, width, channels - > batch_size, channels, height, width
@@ -151,7 +151,7 @@ def generate(prompt : str, uncond_prompt : str, input_image : None,
         images = decoder(latents)
         to_idle(decoder)
         #batch_size,3,height,width
-        images = rescale(images , (-1,-1),(0,255), clamp=True)
+        images = rescale(images , (-1,1),(0,255), clamp=True)
         #batch_size,3,height,width -> batch_size,height,width,3
         images = images.permute(0,2,3,1)
         images = images.to("cpu", dtype=torch.uint8).numpy()
@@ -163,6 +163,7 @@ def rescale(input, old_range, new_range,clamp=False):
     # get the old and new mins and maxs
     old_min, old_max = old_range
     new_min, new_max = new_range
+    x = input
     # rescale the image to have new range
     x-=old_min
     x*= ((new_max-new_min)/(old_max-old_min))

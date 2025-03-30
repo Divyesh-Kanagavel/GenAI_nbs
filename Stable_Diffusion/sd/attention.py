@@ -71,51 +71,60 @@ class selfAttention(nn.Module):
         return output
 
 class crossAttention(nn.Module):
-    def __init__(self,embed_dim : int, num_heads : int, d_cross : int, 
-                 in_proj_bias : bool = True, out_proj_bias : bool = True):
+    def __init__(self, d_embed, n_heads, d_cross, in_proj_bias=True, out_proj_bias=True):
         super().__init__()
-        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=in_proj_bias)
-        self.k_proj = nn.Linear(d_cross, embed_dim, bias = in_proj_bias)
-        self.v_proj = nn.Linear(d_cross, embed_dim, bias=in_proj_bias)
+        self.q_proj   = nn.Linear(d_embed, d_embed, bias=in_proj_bias)
+        self.k_proj   = nn.Linear(d_cross, d_embed, bias=in_proj_bias)
+        self.v_proj   = nn.Linear(d_cross, d_embed, bias=in_proj_bias)
+        self.out_proj = nn.Linear(d_embed, d_embed, bias=out_proj_bias)
+        self.n_heads = n_heads
+        self.d_head = d_embed // n_heads
+    
+    def forward(self, x, y):
+        # x (latent): # (Batch_Size, Seq_Len_Q, Dim_Q)
+        # y (context): # (Batch_Size, Seq_Len_KV, Dim_KV) = (Batch_Size, 77, 768)
 
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=out_proj_bias)
-        self.n_heads = num_heads
-        self.d_head = embed_dim // num_heads
-
-
-    def forward(self,x, y):
-        # x : batch_size, height*width, embed_dim
-        # y : batch_size, seq_len, d_cross
-        # x.shape -> x.shape
-        # query vector from x and key, value from y
+        input_shape = x.shape
+        batch_size, sequence_length, d_embed = input_shape
+        # Divide each embedding of Q into multiple heads such that d_heads * n_heads = Dim_Q
+        interim_shape = (batch_size, -1, self.n_heads, self.d_head)
+        
+        # (Batch_Size, Seq_Len_Q, Dim_Q) -> (Batch_Size, Seq_Len_Q, Dim_Q)
         q = self.q_proj(x)
-        # y.shape -> x.shape
+        # (Batch_Size, Seq_Len_KV, Dim_KV) -> (Batch_Size, Seq_Len_KV, Dim_Q)
         k = self.k_proj(y)
-        # y.shape -> x.shape
+        # (Batch_Size, Seq_Len_KV, Dim_KV) -> (Batch_Size, Seq_Len_KV, Dim_Q)
         v = self.v_proj(y)
 
-        b, seq_len, embed_dim = x.shape
-
-        # b, seq_len, embed_dim -> b, seq_len, n_heads, d_head -> b, n_heads, seq_len, d_head
-        q = q.view((b, seq_len, self.n_heads, self.d_head)).transpose(1,2)
-        k = k.view((b, seq_len, self.n_heads, self.d_head)).transpose(1,2)
-        v = v.view((b, seq_len, self.n_heads, self.d_head)).transpose(1,2)
-
-        # b, n_heads, seq_len, d_head @ b, n_heads, d_head, seq_len -> b, n_heads, seq_len, seq_len
-        attention_scores = q @ k.transpose(-1,-2)
-
-        attention_scores = attention_scores / math.sqrt(self.d_head)
-
-        attention_scores = F.softmax(attention_scores, dim=-1)
-        # b, n_heads, seq_len, d_head
-        output = attention_scores @ v
-        # b, seq_len, n_heads, d_head
-        output = output.transpose(1,2).contiguous()
-        # b, seq_len, embed_dim
-        output = output.view((b, seq_len, embed_dim))
-        # b, seq_len, embed_dim
+        # (Batch_Size, Seq_Len_Q, Dim_Q) -> (Batch_Size, Seq_Len_Q, H, Dim_Q / H) -> (Batch_Size, H, Seq_Len_Q, Dim_Q / H)
+        q = q.view(interim_shape).transpose(1, 2) 
+        # (Batch_Size, Seq_Len_KV, Dim_Q) -> (Batch_Size, Seq_Len_KV, H, Dim_Q / H) -> (Batch_Size, H, Seq_Len_KV, Dim_Q / H)
+        k = k.view(interim_shape).transpose(1, 2) 
+        # (Batch_Size, Seq_Len_KV, Dim_Q) -> (Batch_Size, Seq_Len_KV, H, Dim_Q / H) -> (Batch_Size, H, Seq_Len_KV, Dim_Q / H)
+        v = v.view(interim_shape).transpose(1, 2) 
+        
+        # (Batch_Size, H, Seq_Len_Q, Dim_Q / H) @ (Batch_Size, H, Dim_Q / H, Seq_Len_KV) -> (Batch_Size, H, Seq_Len_Q, Seq_Len_KV)
+        weight = q @ k.transpose(-1, -2)
+        
+        # (Batch_Size, H, Seq_Len_Q, Seq_Len_KV)
+        weight /= math.sqrt(self.d_head)
+        
+        # (Batch_Size, H, Seq_Len_Q, Seq_Len_KV)
+        weight = F.softmax(weight, dim=-1)
+        
+        # (Batch_Size, H, Seq_Len_Q, Seq_Len_KV) @ (Batch_Size, H, Seq_Len_KV, Dim_Q / H) -> (Batch_Size, H, Seq_Len_Q, Dim_Q / H)
+        output = weight @ v
+        
+        # (Batch_Size, H, Seq_Len_Q, Dim_Q / H) -> (Batch_Size, Seq_Len_Q, H, Dim_Q / H)
+        output = output.transpose(1, 2).contiguous()
+        
+        # (Batch_Size, Seq_Len_Q, H, Dim_Q / H) -> (Batch_Size, Seq_Len_Q, Dim_Q)
+        output = output.view(input_shape)
+        
+        # (Batch_Size, Seq_Len_Q, Dim_Q) -> (Batch_Size, Seq_Len_Q, Dim_Q)
         output = self.out_proj(output)
 
+        # (Batch_Size, Seq_Len_Q, Dim_Q)
         return output
 
 

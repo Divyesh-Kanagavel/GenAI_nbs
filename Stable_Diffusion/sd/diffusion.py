@@ -22,7 +22,7 @@ class TimeEmbedding(nn.Module):
         return x
     
 class UNET_ResidualBlock(nn.Module):
-    def __init__(self, in_channels : int, out_channels : int, n_time : 1280):
+    def __init__(self, in_channels : int, out_channels : int, n_time = 1280):
         super().__init__()
         self.groupnorm_feature = nn.GroupNorm(32, in_channels)
         self.conv_feature = nn.Conv2d(in_channels, out_channels, kernel_size=3,padding=1)
@@ -139,15 +139,15 @@ class UNET_AttentionBlock(nn.Module):
 # since we inherit from nn.Sequantial, we do not need to write layers 
 # explicitly , we can directly construct the layers and write forward
 class SwitchSequential(nn.Sequential):
-   
     def forward(self, x, context, time):
         for layer in self:
-            if isinstance(layer, UNET_ResidualBlock):
-                x = layer(x, time)
-            elif isinstance(layer, UNET_AttentionBlock):
+            if isinstance(layer, UNET_AttentionBlock):
                 x = layer(x, context)
+            elif isinstance(layer, UNET_ResidualBlock):
+                x = layer(x, time)
             else:
                 x = layer(x)
+        return x
 
 class Upsample(nn.Module):
     def __init__(self, num_channels):
@@ -176,7 +176,7 @@ class UNET(nn.Module):
             # batch_size, 320, height/16, width/16 -> batch_size, 640, height/16, width/16  
             SwitchSequential(UNET_ResidualBlock(320,640), UNET_AttentionBlock(8,80)),
 
-            SwitchSequential(UNET_ResidualBlock(320,640), UNET_AttentionBlock(8,80)),
+            SwitchSequential(UNET_ResidualBlock(640,640), UNET_AttentionBlock(8,80)),
             # batch_size, 640, height/16, width/16 -> # batch_size, 640, height/32, width/32
             SwitchSequential(nn.Conv2d(640, 640, kernel_size=3, stride=2, padding=1)),
             #batch_size, 640, height/32, width/32 -> # batch_size, 1280, height/32, width/32
@@ -190,7 +190,7 @@ class UNET(nn.Module):
             SwitchSequential(UNET_ResidualBlock(1280, 1280)),
             # batch_size, 1280, height/64, width/64
             SwitchSequential(UNET_ResidualBlock(1280, 1280)),
-        ]),
+        ])
         
         self.bottle_neck = SwitchSequential(
             # batch_size, 1280, height/64, width/64 -> batch_size, 1280, height/64, width/64
@@ -209,6 +209,8 @@ class UNET(nn.Module):
             SwitchSequential(UNET_ResidualBlock(2560, 1280)),
             # batch_size, 2560, height/64, width/64 -> batch_size, 1280, height/64, width/64 -> batch_size, 1280, height/32, width/32
             SwitchSequential(UNET_ResidualBlock(2560, 1280), Upsample(1280)),
+            # batch_size, 2560, height/32, width/32 -> # batch_size, 1280, height/32, width/32
+            SwitchSequential(UNET_ResidualBlock(2560, 1280), UNET_AttentionBlock(8,160)),
             # batch_size, 2560, height/32, width/32 -> # batch_size, 1280, height/32, width/32
             SwitchSequential(UNET_ResidualBlock(2560, 1280), UNET_AttentionBlock(8,160)),
             # batch_size, 2560, height/32, width/32 -> # batch_size, 1280, height/16, width/16

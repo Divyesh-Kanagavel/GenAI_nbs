@@ -10,13 +10,13 @@ class CLIPEmbedding(nn.Module):
     def __init__(self, vocab_size : int, embed_dim : int, n_tokens : int):
         super().__init__()
         # embedding layer for the tokens with vocab_size length
-        self.embedding = nn.Embedding(vocab_size, embed_dim)
+        self.token_embedding = nn.Embedding(vocab_size, embed_dim)
         # a learnable tensor which encodes the positional information of tokens
         self.position_embedding = nn.Parameter(torch.zeros((n_tokens, embed_dim)))
     
     def forward(self, x):
         # batch_size, seq_len -> batch_size, seq_len, embed_dim
-        x = self.embedding(x)
+        x = self.token_embedding(x)
         # batch_size, seq_len, embed_dim -> batch_size, seq_len, embed_dim
         x += self.position_embedding
 
